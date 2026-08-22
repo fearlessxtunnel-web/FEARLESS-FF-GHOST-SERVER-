@@ -2,7 +2,10 @@ const { Redis } = require("@upstash/redis");
 const crypto = require("crypto");
 
 module.exports = async function handler(req, res) {
+  // Only allow POST
   if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+
     return res.status(405).json({
       ok: false,
       error: "Method not allowed"
@@ -10,6 +13,7 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    // Read Redis credentials from Vercel
     const url =
       process.env.KV_REST_API_URL ||
       process.env.UPSTASH_REDIS_REST_URL;
@@ -19,36 +23,58 @@ module.exports = async function handler(req, res) {
       process.env.UPSTASH_REDIS_REST_TOKEN;
 
     if (!url || !token) {
+      console.error("Redis environment variables are missing");
+
       return res.status(500).json({
         ok: false,
         error: "Redis environment variables are missing"
       });
     }
 
-    const redis = new Redis({ url, token });
+    const redis = new Redis({
+      url,
+      token
+    });
 
+    // Generate exactly 4 hexadecimal characters
     const part = () =>
-      crypto.randomBytes(3).toString("hex").toUpperCase();
+      crypto
+        .randomBytes(2)
+        .toString("hex")
+        .toUpperCase();
 
-    const key = `GST-${part()}-${part()}-${part()}`;
+    // GST-XXXX-XXXX-XXXX
+    const key =
+      `GST-${part()}-${part()}-${part()}`;
 
+    // 39 minutes
     const ttl = 39 * 60;
+
     const now = Date.now();
 
+    const license = {
+      key: key,
+      createdAt: now,
+      expiresAt: now + ttl * 1000,
+      active: true
+    };
+
+    // Store license with automatic expiration
     await redis.set(
       `license:${key}`,
-      JSON.stringify({
-        key,
-        createdAt: now,
-        expiresAt: now + ttl * 1000,
-        active: true
-      }),
-      { ex: ttl }
+      JSON.stringify(license),
+      {
+        ex: ttl
+      }
+    );
+
+    console.log(
+      `Generated key: ${key} | TTL: ${ttl}s`
     );
 
     return res.status(200).json({
       ok: true,
-      key,
+      key: key,
       expiresIn: ttl
     });
 
